@@ -19,6 +19,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -229,6 +231,17 @@ func (i *Initiator) handleConnection(session *session, tlsConfig *tls.Config, di
 		select {
 		case <-disconnected:
 		case <-i.stopChan:
+			// The writer closes the connection only after its last write,
+			// and a write has no deadline: a counterparty that stops
+			// reading leaves it blocked, on the Logout itself, after the
+			// session has timed the Logout out and stopped. Close the
+			// connection once the session has stopped, so Stop does not
+			// return while it is still open.
+			session.stop()
+			wg.Wait()
+			if err := netConn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				session.log.OnEvent(err.Error())
+			}
 			return
 		}
 
