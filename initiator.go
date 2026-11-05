@@ -19,8 +19,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"errors"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +179,7 @@ func (i *Initiator) handleConnection(session *session, tlsConfig *tls.Config, di
 		var disconnected chan interface{}
 		var msgIn chan fixIn
 		var msgOut chan []byte
+		var writer *stopWriter
 
 		address := session.SocketConnectAddress[connectionAttempt%len(session.SocketConnectAddress)]
 		session.log.OnEventf("Connecting to: %v", address)
@@ -216,8 +215,9 @@ func (i *Initiator) handleConnection(session *session, tlsConfig *tls.Config, di
 
 		go readLoop(newParser(bufio.NewReader(netConn)), msgIn, session.log)
 		disconnected = make(chan interface{})
+		writer = &stopWriter{conn: netConn, timeout: session.LogoutTimeout}
 		go func() {
-			writeLoop(netConn, msgOut, session.log)
+			writeLoop(writer, msgOut, session.log)
 			if err := netConn.Close(); err != nil {
 				session.log.OnEvent(err.Error())
 			}
@@ -231,17 +231,26 @@ func (i *Initiator) handleConnection(session *session, tlsConfig *tls.Config, di
 		select {
 		case <-disconnected:
 		case <-i.stopChan:
-			// The writer closes the connection only after its last write,
-			// and a write has no deadline: a counterparty that stops
-			// reading leaves it blocked, on the Logout itself, after the
-			// session has timed the Logout out and stopped. Close the
-			// connection once the session has stopped, so Stop does not
-			// return while it is still open.
+			// A write has no deadline of its own, and the session loop
+			// waits for the writer to take each message: a counterparty
+			// that stops reading would hold a write, the session loop
+			// behind it, and so this stop, with the connection open. From
+			// here every write gets LogoutTimeout. A write still not taken
+			// then closes the connection, and the session can stop.
+			writer.stop()
 			session.stop()
 			wg.Wait()
-			if err := netConn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-				session.log.OnEvent(err.Error())
+			// The writer may still be on its last message (a Logout, or
+			// the answer to the counterparty's) or closing the connection.
+			// Give it LogoutTimeout, then close the transport under it, so
+			// Stop never returns while the connection is open.
+			timer := time.NewTimer(session.LogoutTimeout)
+			select {
+			case <-disconnected:
+			case <-timer.C:
 			}
+			timer.Stop()
+			closeTransport(netConn, session.log)
 			return
 		}
 
