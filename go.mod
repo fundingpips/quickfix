@@ -1,6 +1,6 @@
 module github.com/quickfixgo/quickfix
 
-go 1.23
+go 1.24
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.22
@@ -16,7 +16,7 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/klauspost/compress v1.15.12 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
